@@ -38,7 +38,7 @@ OUTPUT_DIR = "output"
 # Shared simulation parameters
 # ---------------------------------------------------------------------------
 
-N_TRIALS   = 2000        # Monte Carlo trials
+N_TRIALS   = 30        # Monte Carlo trials
 DT         = 0.02      # timestep [s]
 T_SPAN     = (0.0, 8.0)
 
