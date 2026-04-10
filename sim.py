@@ -554,42 +554,55 @@ class CircleTangentFacing(RigidBodySim):
 
 class SinusoidForward(RigidBodySim):
     """
-    Forward motion with sinusoidal lateral force in body frame.
-    Body always faces direction of travel.
+    Traces a vertical sine wave: x oscillates, y advances at constant average
+    speed, body heading always aligns with the direction of travel.
+
+    Desired velocity in world frame:
+        vx_d(t) = lat_amp * cos(2π * lat_freq * t)
+        vy_d(t) = sqrt(speed² − vx_d²)   ← keeps |v| = speed exactly
+
+    A proportional velocity-tracking force drives the body to follow this
+    profile.  The parametric curve (x, y) is an upright sine wave.
 
     Parameters
     ----------
-    forward_force : constant body-x thrust [N]
-    lat_amp       : lateral force amplitude [N]
-    lat_freq      : lateral force frequency [Hz]
+    speed    : constant linear speed [m/s]  (must satisfy lat_amp ≤ speed)
+    lat_amp  : lateral (x) velocity amplitude [m/s]
+    lat_freq : lateral oscillation frequency [Hz]
+    kv       : velocity tracking gain [1/s]
     """
 
     def __init__(
         self,
-        forward_force: float = 5.0,
-        lat_amp:       float = 2.0,
-        lat_freq:      float = 0.5,
+        speed:    float = 2.0,
+        lat_amp:  float = 1.0,
+        lat_freq: float = 0.3,
+        kv:       float = 8.0,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self.forward_force = forward_force
-        self.lat_amp       = lat_amp
-        self.lat_freq      = lat_freq
+        self.speed    = speed
+        self.lat_amp  = min(lat_amp, speed)   # clamp so vy_d stays real
+        self.lat_freq = lat_freq
+        self.kv       = kv
 
-    def force_body_B(self, t: float, state: np.ndarray) -> np.ndarray:
-        """Forward thrust + sinusoidal lateral force (body frame)."""
-        fx = np.full(self.n, self.forward_force)
-        fy = self.lat_amp * np.sin(2 * np.pi * self.lat_freq * t)
-        return np.stack([fx, np.full(self.n, fy)], axis=-1)
+    def force_world_W(self, t: float, state: np.ndarray) -> np.ndarray:
+        """Velocity-tracking force in world frame."""
+        vx, vy  = state[:, 3], state[:, 4]
+        vx_d    = self.lat_amp * np.cos(2 * np.pi * self.lat_freq * t)
+        vy_d    = np.sqrt(max(self.speed**2 - vx_d**2, 0.0))
+        fx      = self.mass * self.kv * (vx_d - vx)
+        fy      = self.mass * self.kv * (vy_d - vy)
+        return np.stack([fx, fy], axis=-1)
 
     def torque(self, t: float, state: np.ndarray) -> np.ndarray:
-        # Drive heading toward velocity direction
-        vx, vy = state[:, 3], state[:, 4]
-        theta  = state[:, 2]
-        speed  = np.hypot(vx, vy)
+        # Align heading with the current velocity direction
+        vx, vy  = state[:, 3], state[:, 4]
+        theta   = state[:, 2]
+        speed   = np.hypot(vx, vy)
         desired = np.where(speed > 0.1, np.arctan2(vy, vx), theta)
         err     = _wrap(desired - theta)
-        kp, kd  = 8.0, 2.0
+        kp, kd  = 12.0, 3.0
         return self.inertia * (kp * err - kd * state[:, 5])
 
 

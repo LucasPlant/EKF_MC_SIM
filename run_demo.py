@@ -38,7 +38,7 @@ OUTPUT_DIR = "output"
 # Shared simulation parameters
 # ---------------------------------------------------------------------------
 
-N_TRIALS   = 20        # Monte Carlo trials
+N_TRIALS   = 2000        # Monte Carlo trials
 DT         = 0.02      # timestep [s]
 T_SPAN     = (0.0, 8.0)
 
@@ -46,8 +46,8 @@ MASS       = 1.0       # [kg]
 INERTIA    = 0.5       # [kg·m²]
 
 NOISE_CFG  = NoiseConfig(
-    imu_cov = np.diag([0.05**2, 0.05**2, 0.005**2]),
-    pos_cov = np.diag([0.03**2, 0.03**2]),
+    imu_cov = np.diag([0.1**2, 0.1**2, 0.05**2]),
+    pos_cov = np.diag([0.2**2, 0.2**2]),
     seed    = 42,
 )
 
@@ -75,8 +75,8 @@ DEMOS: dict[str, dict] = {
     "sinusoid": dict(
         label   = "Forward Sinusoid",
         sim_cls = SinusoidForward,
-        sim_kw  = dict(forward_force=5.0, lat_amp=3.0, lat_freq=0.3),
-        init    = _initial_state(x0=0.0, y0=0.0, theta0=0.0, vx0=1.0, vy0=0.0),
+        sim_kw  = dict(speed=2.0, lat_amp=1.0, lat_freq=0.3),
+        init    = _initial_state(x0=0.0, y0=0.0, theta0=np.pi/2, vx0=0.0, vy0=2.0),
     ),
     "random_walk": dict(
         label   = "Random Walk",

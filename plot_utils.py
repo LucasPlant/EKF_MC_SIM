@@ -368,8 +368,11 @@ def plot_imu_measurements(
     alpha: float = 0.25,
 ) -> go.Figure:
     """
-    Three stacked subplots — body-frame accel x, accel y, and angular rate —
-    one line per MC trial with a dotted mean line and dotted ±1σ bounds.
+    Three stacked subplots — body-frame accel x, accel y, and angular rate.
+
+    One line per MC trial.  The ground truth (trial 0, noise-free) is shown
+    as a solid orange line.  The ±1σ bounds are the theoretical noise standard
+    deviation from noise_cfg.imu_cov (constant band around ground truth).
 
     Parameters
     ----------
@@ -378,28 +381,44 @@ def plot_imu_measurements(
     alpha : opacity for individual trial lines
     """
     times = traj.timestamps
+    nt    = traj.nt
+
+    # --- Ground truth body-frame signals from trial 0 ---
+    # Rotate world-frame acceleration into body frame using trial-0 heading
+    theta_gt = np.array([traj.poses[k].theta[0] for k in range(nt)])  # (nt,)
+    c, s     = np.cos(theta_gt), np.sin(theta_gt)
+    ax_W_gt  = traj.acceleration_W[0, :, 0]
+    ay_W_gt  = traj.acceleration_W[0, :, 1]
+    ax_B_gt  =  c * ax_W_gt + s * ay_W_gt
+    ay_B_gt  = -s * ax_W_gt + c * ay_W_gt
+    om_gt    = traj.angular_velocity[0, :]                             # (nt,)
+
+    # --- Theoretical ±1σ from noise_cfg.imu_cov ---
+    sigma_ax = np.sqrt(traj.noise_cfg.imu_cov[0, 0])   # scalar
+    sigma_ay = np.sqrt(traj.noise_cfg.imu_cov[1, 1])
+    sigma_om = np.sqrt(traj.noise_cfg.imu_cov[2, 2])
+
+    # Measurement arrays
     ax_B  = traj.accel_meas_B[:, :, 0]    # (n, nt)
-    ay_B  = traj.accel_meas_B[:, :, 1]    # (n, nt)
-    omega = traj.gyro_meas_B               # (n, nt)
+    ay_B  = traj.accel_meas_B[:, :, 1]
+    omega = traj.gyro_meas_B
 
     panels = [
-        (ax_B,  "a_x [m/s²]",  "Accel x — body frame"),
-        (ay_B,  "a_y [m/s²]",  "Accel y — body frame"),
-        (omega, "ω [rad/s]",   "Angular rate — body frame"),
+        (ax_B,  ax_B_gt, sigma_ax, "a_x [m/s²]", "Accel x — body frame"),
+        (ay_B,  ay_B_gt, sigma_ay, "a_y [m/s²]", "Accel y — body frame"),
+        (omega, om_gt,   sigma_om, "ω [rad/s]",  "Angular rate — body frame"),
     ]
 
     fig = make_subplots(
         rows=3, cols=1,
         shared_xaxes=True,
         vertical_spacing=0.07,
-        subplot_titles=[p[2] for p in panels],
+        subplot_titles=[p[4] for p in panels],
     )
 
     _ax_style = dict(gridcolor=_GRID, zerolinecolor=_GRID, color=_FG)
 
-    for row, (data, ylabel, _) in enumerate(panels, start=1):
-        mean_  = data.mean(axis=0)   # (nt,)
-        sigma_ = data.std(axis=0)    # (nt,)
+    for row, (data, gt, sigma_, ylabel, _) in enumerate(panels, start=1):
 
         # Individual trials
         for i in range(traj.n):
@@ -414,12 +433,12 @@ def plot_imu_measurements(
                 legendgroup=f"trial_{i}",
             ), row=row, col=1)
 
-        # ±1σ filled region
+        # ±1σ theoretical filled region
         fig.add_trace(go.Scatter(
             x=np.concatenate([times, times[::-1]]),
-            y=np.concatenate([mean_ + sigma_, (mean_ - sigma_)[::-1]]),
+            y=np.concatenate([gt + sigma_, (gt - sigma_)[::-1]]),
             fill="toself",
-            fillcolor="rgba(200,200,200,0.07)",
+            fillcolor="rgba(188,140,255,0.12)",
             line=dict(color="rgba(0,0,0,0)"),
             name="±1σ region",
             showlegend=(row == 1),
@@ -429,22 +448,22 @@ def plot_imu_measurements(
         # ±1σ dotted boundary lines
         for sign, sname in [(1, "+1σ"), (-1, "−1σ")]:
             fig.add_trace(go.Scatter(
-                x=times, y=mean_ + sign * sigma_,
+                x=times, y=gt + sign * sigma_,
                 mode="lines",
-                line=dict(color=_FG, width=1.0, dash="dot"),
+                line=dict(color=_PURPLE, width=2.0, dash="dot"),
                 name=sname,
                 showlegend=(row == 1),
                 legendgroup=sname,
             ), row=row, col=1)
 
-        # Mean dotted line
+        # Ground truth solid line
         fig.add_trace(go.Scatter(
-            x=times, y=mean_,
+            x=times, y=gt,
             mode="lines",
-            line=dict(color="white", width=2.0, dash="dot"),
-            name="mean",
+            line=dict(color=_ORANGE, width=2.5),
+            name="ground truth",
             showlegend=(row == 1),
-            legendgroup="mean",
+            legendgroup="gt",
         ), row=row, col=1)
 
         fig.update_yaxes(title_text=ylabel, row=row, col=1, **_ax_style)
@@ -472,15 +491,16 @@ def plot_imu_measurements(
 
 def plot_trajectory_with_bounds(
     traj: RigidBodyTrajectory,
-    title: str = "MC Trajectories — Mean & ±1σ Bounds",
+    title: str = "MC Trajectories — Ground Truth & ±1σ Bounds",
     alpha: float = 0.35,
 ) -> go.Figure:
     """
-    Parametric 2D trajectory for every MC trial, overlaid with a dotted mean
-    path and dotted ±1σ boundary curves.
+    Noisy position measurements for every MC trial, overlaid with the ground
+    truth path (trial 0, solid orange) and theoretical ±1σ tube from
+    noise_cfg.pos_cov (dotted purple, offset perpendicular to the GT path).
 
-    The ±1σ tube is computed as sqrt(std_x² + std_y²) offset perpendicular
-    to the mean path direction at each timestep.
+    The tube half-width at each point is the 1σ uncertainty projected onto
+    the path-normal direction: sqrt(nx²·σ_x² + ny²·σ_y²).
 
     Parameters
     ----------
@@ -488,35 +508,39 @@ def plot_trajectory_with_bounds(
     title : figure title
     alpha : opacity for individual trial lines
     """
-    n = traj.n
+    n  = traj.n
+    nt = traj.nt
 
-    # Position arrays: (n, nt)
-    xs = np.array([[p.x[i] for p in traj.poses] for i in range(n)])
-    ys = np.array([[p.y[i] for p in traj.poses] for i in range(n)])
+    # Noisy position measurements: (n, nt)
+    xs = traj.pos_meas_W[:, :, 0]
+    ys = traj.pos_meas_W[:, :, 1]
 
-    mean_x = xs.mean(axis=0)
-    mean_y = ys.mean(axis=0)
-    std_x  = xs.std(axis=0)
-    std_y  = ys.std(axis=0)
+    # Ground truth from trial 0 (noiseless poses)
+    gt_x = np.array([traj.poses[k].x[0] for k in range(nt)])
+    gt_y = np.array([traj.poses[k].y[0] for k in range(nt)])
 
-    # Unit normal perpendicular to the mean path (left-hand side)
-    dx  = np.gradient(mean_x)
-    dy  = np.gradient(mean_y)
+    # Theoretical noise std from pos_cov
+    sigma_x = np.sqrt(traj.noise_cfg.pos_cov[0, 0])   # scalar
+    sigma_y = np.sqrt(traj.noise_cfg.pos_cov[1, 1])
+
+    # Unit normal perpendicular to the ground truth path
+    dx  = np.gradient(gt_x)
+    dy  = np.gradient(gt_y)
     mag = np.hypot(dx, dy) + 1e-12
     nx  = -dy / mag
     ny  =  dx / mag
 
-    # Scalar spread → tube half-width
-    sigma = np.sqrt(std_x**2 + std_y**2)
+    # 1σ tube half-width: project noise ellipse onto normal direction
+    sigma_n = np.sqrt(nx**2 * sigma_x**2 + ny**2 * sigma_y**2)
 
-    upper_x = mean_x + sigma * nx
-    upper_y = mean_y + sigma * ny
-    lower_x = mean_x - sigma * nx
-    lower_y = mean_y - sigma * ny
+    upper_x = gt_x + sigma_n * nx
+    upper_y = gt_y + sigma_n * ny
+    lower_x = gt_x - sigma_n * nx
+    lower_y = gt_y - sigma_n * ny
 
     fig = go.Figure()
 
-    # Individual MC trial paths
+    # Individual MC trial measurement paths
     for i in range(n):
         colour = _MC_COLOURS[i % len(_MC_COLOURS)]
         fig.add_trace(go.Scatter(
@@ -533,7 +557,7 @@ def plot_trajectory_with_bounds(
         x=np.concatenate([upper_x, lower_x[::-1]]),
         y=np.concatenate([upper_y, lower_y[::-1]]),
         fill="toself",
-        fillcolor="rgba(200,200,200,0.08)",
+        fillcolor="rgba(188,140,255,0.12)",
         line=dict(color="rgba(0,0,0,0)"),
         name="±1σ region",
     ))
@@ -543,16 +567,16 @@ def plot_trajectory_with_bounds(
         fig.add_trace(go.Scatter(
             x=bx, y=by,
             mode="lines",
-            line=dict(color=_FG, width=1.2, dash="dot"),
+            line=dict(color=_PURPLE, width=2.0, dash="dot"),
             name=label,
         ))
 
-    # Mean path dotted
+    # Ground truth path — solid orange
     fig.add_trace(go.Scatter(
-        x=mean_x, y=mean_y,
+        x=gt_x, y=gt_y,
         mode="lines",
-        line=dict(color="white", width=2.5, dash="dot"),
-        name="mean",
+        line=dict(color=_ORANGE, width=3.0),
+        name="ground truth",
     ))
 
     fig.update_layout(
