@@ -158,9 +158,10 @@ Vectorized batch of $n$ SE(2) transforms. Core storage: three `(n,)` arrays.
 ```python
 @dataclass
 class NoiseConfig:
-    imu_cov: np.ndarray   # (3,3) — [accel_x_B, accel_y_B, omega_B]
-    pos_cov: np.ndarray   # (2,2) — [x_W, y_W]
-    seed:    Optional[int]
+    imu_cov:     np.ndarray   # (3,3) — [accel_x_B, accel_y_B, omega_B]
+    pos_cov:     np.ndarray   # (2,2) — [x_W, y_W]
+    heading_var: float        # scalar variance for heading measurement [rad²]
+    seed:        Optional[int]
 ```
 
 ---
@@ -182,6 +183,7 @@ Container for all trajectory data across $n$ trials and $n_t$ timesteps.
 | `accel_meas_B` | $(n, n_t, 2)$ | B | Noisy body-frame accelerometer |
 | `gyro_meas_B` | $(n, n_t)$ | B | Noisy body-frame gyroscope |
 | `pos_meas_W` | $(n, n_t, 2)$ | W | Noisy world-frame position |
+| `heading_meas_W` | $(n, n_t)$ | W | Noisy world-frame heading $\tilde\theta$ [rad] |
 
 ---
 
@@ -294,9 +296,14 @@ $$\tilde\omega_B = \dot\theta + \eta_\omega, \qquad \eta_\omega \sim \mathcal{N}
 
 The full $3\times 3$ IMU covariance $\Sigma_{\text{imu}}$ is drawn jointly from `NoiseConfig.imu_cov`.
 
-### Position — GPS / external (`pos_meas_W`)
+### Position & Heading — pseudo-GPS (`pos_meas_W`, `heading_meas_W`)
 
 $$\tilde{\mathbf{p}}_W = \begin{bmatrix}x\\y\end{bmatrix} + \boldsymbol{\eta}_p, \qquad \boldsymbol{\eta}_p \sim \mathcal{N}(\mathbf{0},\, \Sigma_{\text{pos}})$$
+
+$$\tilde\theta_W = \theta + \eta_\theta, \qquad \eta_\theta \sim \mathcal{N}(0,\, \sigma_\theta^2)$$
+
+The heading measurement is wrapped to $(-\pi, \pi]$ after noise is added.
+`heading_var` $= \sigma_\theta^2$ is set independently of `pos_cov` so the rotation update can be toggled or ablated in EKF experiments.
 
 ---
 

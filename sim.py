@@ -203,9 +203,10 @@ class NoiseConfig:
     """
     Measurement noise parameters.
 
-    imu_cov : (3, 3) covariance for [accel_x, accel_y, omega]
-    pos_cov : (2, 2) covariance for [x, y] position measurement
-    seed    : optional RNG seed for reproducibility
+    imu_cov     : (3, 3) covariance for [accel_x, accel_y, omega]
+    pos_cov     : (2, 2) covariance for [x, y] position measurement
+    heading_var : scalar variance for heading (theta) measurement [rad²]
+    seed        : optional RNG seed for reproducibility
     """
     imu_cov: np.ndarray = field(
         default_factory=lambda: np.diag([0.1**2, 0.1**2, 0.01**2])
@@ -213,6 +214,7 @@ class NoiseConfig:
     pos_cov: np.ndarray = field(
         default_factory=lambda: np.diag([0.05**2, 0.05**2])
     )
+    heading_var: float = 0.05**2
     seed: Optional[int] = None
 
     def rng(self) -> np.random.Generator:
@@ -242,6 +244,7 @@ class RigidBodyTrajectory:
     - accel_meas_B     : (n, nt, 2)   noisy body-frame acceleration measurement
     - gyro_meas_B      : (n, nt)      noisy body-frame angular velocity measurement
     - pos_meas_W       : (n, nt, 2)   noisy world-frame position measurement
+    - heading_meas_W   : (n, nt)      noisy world-frame heading measurement [rad]
     """
     n:   int
     nt:  int
@@ -262,6 +265,7 @@ class RigidBodyTrajectory:
     accel_meas_B:       np.ndarray  = field(init=False)
     gyro_meas_B:        np.ndarray  = field(init=False)
     pos_meas_W:         np.ndarray  = field(init=False)
+    heading_meas_W:     np.ndarray  = field(init=False)
 
     def __post_init__(self):
         n, nt = self.n, self.nt
@@ -274,6 +278,7 @@ class RigidBodyTrajectory:
         self.accel_meas_B      = np.zeros((n, nt, 2))
         self.gyro_meas_B       = np.zeros((n, nt))
         self.pos_meas_W        = np.zeros((n, nt, 2))
+        self.heading_meas_W    = np.zeros((n, nt))
 
 
 # ---------------------------------------------------------------------------
@@ -388,8 +393,9 @@ class RigidBodySim:
         imu_cov = self.noise_cfg.imu_cov
         pos_cov = self.noise_cfg.pos_cov
 
-        imu_noise = rng.multivariate_normal(np.zeros(3), imu_cov, size=(n, nt))
-        pos_noise = rng.multivariate_normal(np.zeros(2), pos_cov, size=(n, nt))
+        imu_noise     = rng.multivariate_normal(np.zeros(3), imu_cov, size=(n, nt))
+        pos_noise     = rng.multivariate_normal(np.zeros(2), pos_cov, size=(n, nt))
+        heading_noise = rng.normal(0.0, np.sqrt(self.noise_cfg.heading_var), size=(n, nt))
 
         # Body-frame acceleration = R^T * world_accel
         for k in range(nt):
@@ -407,6 +413,7 @@ class RigidBodySim:
         for k in range(nt):
             traj.pos_meas_W[:, k, 0] = traj.poses[k].x + pos_noise[:, k, 0]
             traj.pos_meas_W[:, k, 1] = traj.poses[k].y + pos_noise[:, k, 1]
+            traj.heading_meas_W[:, k] = _wrap(traj.poses[k].theta + heading_noise[:, k])
 
     # ------------------------------------------------------------------
     # Main simulate entry point

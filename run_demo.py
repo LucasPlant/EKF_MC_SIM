@@ -40,15 +40,16 @@ OUTPUT_DIR = "output"
 
 N_TRIALS   = 30        # Monte Carlo trials
 DT         = 0.02      # timestep [s]
-T_SPAN     = (0.0, 8.0)
+T_SPAN     = (0.0, 20.0)
 
 MASS       = 1.0       # [kg]
 INERTIA    = 0.5       # [kg·m²]
 
 NOISE_CFG  = NoiseConfig(
-    imu_cov = np.diag([0.1**2, 0.1**2, 0.05**2]),
-    pos_cov = np.diag([0.2**2, 0.2**2]),
-    seed    = 42,
+    imu_cov     = np.diag([0.1**2, 0.1**2, 0.05**2]),
+    pos_cov     = np.diag([0.2**2, 0.2**2]),
+    heading_var = 0.1**2,   # ~5.7° std dev for pseudo-GPS heading
+    seed        = 42,
 )
 
 # ---------------------------------------------------------------------------

@@ -29,7 +29,7 @@ Each demo runs **2000 Monte Carlo trials** over an 8-second simulation window an
 
 **`SE2`** — Vectorized SE(2) Lie group transforms. Handles rigid body poses (x, y, θ) with composition, inversion, and exp/log maps for all n trials at once.
 
-**`NoiseConfig`** — Configures Gaussian noise for IMU (accelerometer + gyro) and GPS-style position measurements.
+**`NoiseConfig`** — Configures Gaussian noise for IMU (accelerometer + gyro), GPS-style position measurements, and a heading measurement (pseudo-GPS rotation update).
 
 **`RigidBodyTrajectory`** — Container for all simulation outputs across n trials and nt timesteps: true poses, velocities, accelerations, forces/torques, and noisy IMU/position measurements.
 
