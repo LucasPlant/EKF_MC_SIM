@@ -9,6 +9,13 @@ Public API
 plot_trajectory    — static path with body-axes arrows at sampled poses
 animate_trajectory — frame-by-frame animation
 plot_mc_paths      — overlaid paths for all MC trials
+plot_imu_measurements     — IMU time-series subplots
+plot_trajectory_with_bounds — MC paths with ±1σ spatial tube
+confidence_ellipse — closed (x, y) curve for a 2-D Gaussian
+animate_estimate   — animated EKF estimate for a single MC trial
+plot_mc_estimates  — all MC trial EKF estimates overlaid with ground truth
+plot_ekf_states    — time-series of all 5 KF states vs GT and measurements
+plot_mc_mse        — trace(P) over time for every MC trial
 """
 
 from __future__ import annotations
@@ -47,7 +54,15 @@ _AXIS_LAYOUT = dict(
     legend=dict(bgcolor="#161b22", bordercolor=_GRID, borderwidth=1),
 )
 
-_YAXIS_BASE = dict(gridcolor=_GRID, zerolinecolor=_GRID, color=_FG)
+# Like _AXIS_LAYOUT but without the xaxis key — safe to use alongside explicit xaxis=
+_LAYOUT_BASE = dict(
+    paper_bgcolor=_BG,
+    plot_bgcolor=_BG,
+    font=dict(color=_FG, family="monospace"),
+    legend=dict(bgcolor="#161b22", bordercolor=_GRID, borderwidth=1),
+)
+
+_YAXIS_BASE  = dict(gridcolor=_GRID, zerolinecolor=_GRID, color=_FG)
 _YAXIS_EQUAL = dict(**_YAXIS_BASE, scaleanchor="x", scaleratio=1)
 
 
@@ -585,5 +600,377 @@ def plot_trajectory_with_bounds(
         yaxis_title="y [m]",
         yaxis=_YAXIS_EQUAL,
         **_AXIS_LAYOUT,
+    )
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# 6. Confidence ellipse helper
+# ---------------------------------------------------------------------------
+
+def confidence_ellipse(
+    cx: float,
+    cy: float,
+    cov_2x2: np.ndarray,
+    n_std: float = 2.0,
+    n_points: int = 60,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Closed-curve (x, y) for an `n_std`-sigma confidence ellipse of `cov_2x2`
+    centred at (cx, cy).
+    """
+    eigvals, eigvecs = np.linalg.eigh(cov_2x2)
+    eigvals = np.clip(eigvals, 0.0, None)
+    angle   = np.arctan2(eigvecs[1, 1], eigvecs[0, 1])
+    a = n_std * np.sqrt(eigvals[1])   # major semi-axis
+    b = n_std * np.sqrt(eigvals[0])   # minor semi-axis
+
+    t = np.linspace(0.0, 2.0 * np.pi, n_points)
+    xl = a * np.cos(t)
+    yl = b * np.sin(t)
+    c, s = np.cos(angle), np.sin(angle)
+    return cx + c * xl - s * yl, cy + s * xl + c * yl
+
+
+# ---------------------------------------------------------------------------
+# 7. Animated EKF estimate — single trial
+# ---------------------------------------------------------------------------
+
+def animate_estimate(
+    traj:       RigidBodyTrajectory,
+    s_hist:     np.ndarray,
+    P_hist:     np.ndarray,
+    trial:      int = 0,
+    step:       int = 4,
+    n_std:      float = 2.0,
+    heading_len: float = 1.0,
+    vel_scale:  float = 0.5,
+    title:      str = "EKF — Single Trial Estimate",
+    frame_duration_ms: int = 40,
+) -> go.Figure:
+    """
+    Animate the EKF estimate for one MC trial.
+
+    Each frame shows the estimated path so far, the ground-truth path, an
+    `n_std`-sigma position-variance ellipse, heading ±n_std·σ_θ rays, and a
+    mean-velocity arrow.
+
+    Parameters
+    ----------
+    s_hist : (n_trials, nt, 5)  EKF state history [x, y, θ, vx, vy]
+    P_hist : (n_trials, nt, 5, 5)  EKF covariance history
+    step   : timestep stride for animation frames
+    n_std  : confidence level (e.g. 2.0 ≈ 95 %)
+    heading_len : length of heading rays in world units
+    vel_scale   : multiplier on velocity vector for the arrow length
+    """
+    s = s_hist[trial]                     # (nt, 5)
+    P = P_hist[trial]                     # (nt, 5, 5)
+    gt_xs, gt_ys, _ = _extract_path(traj, trial)
+    nt      = s.shape[0]
+    indices = np.arange(0, nt, step)
+
+    pad  = 1.0
+    xmin = min(s[:, 0].min(), gt_xs.min()) - pad
+    xmax = max(s[:, 0].max(), gt_xs.max()) + pad
+    ymin = min(s[:, 1].min(), gt_ys.min()) - pad
+    ymax = max(s[:, 1].max(), gt_ys.max()) + pad
+
+    meas_xs = traj.pos_meas_W[trial, :, 0]
+    meas_ys = traj.pos_meas_W[trial, :, 1]
+
+    def frame_traces(i: int) -> list[go.Scatter]:
+        cx, cy, th, vx, vy = s[i]
+        sigma_th = n_std * np.sqrt(max(P[i, 2, 2], 0.0))
+        ex, ey   = confidence_ellipse(cx, cy, P[i, 0:2, 0:2], n_std=n_std)
+
+        rays_x, rays_y = [], []
+        for sign in (+1, -1):
+            ang = th + sign * sigma_th
+            rays_x.extend([cx, cx + heading_len * np.cos(ang), None])
+            rays_y.extend([cy, cy + heading_len * np.sin(ang), None])
+
+        return [
+            go.Scatter(
+                x=gt_xs[: i + 1], y=gt_ys[: i + 1],
+                mode="lines",
+                line=dict(color=_ORANGE, width=2, dash="dot"),
+                name="ground truth",
+            ),
+            go.Scatter(
+                x=meas_xs[: i + 1], y=meas_ys[: i + 1],
+                mode="lines",
+                line=dict(color=_WARM, width=0.8),
+                opacity=0.6,
+                name="measurement",
+            ),
+            go.Scatter(
+                x=s[: i + 1, 0], y=s[: i + 1, 1],
+                mode="lines",
+                line=dict(color=_ACCENT, width=2),
+                name="estimate",
+            ),
+            go.Scatter(
+                x=ex, y=ey,
+                mode="lines",
+                line=dict(color=_PURPLE, width=1.5),
+                fill="toself", fillcolor="rgba(188,140,255,0.12)",
+                name=f"position ±{n_std:g}σ",
+            ),
+            go.Scatter(
+                x=rays_x, y=rays_y,
+                mode="lines",
+                line=dict(color=_PURPLE, width=2, dash="dash"),
+                name=f"heading ±{n_std:g}σ",
+            ),
+            go.Scatter(
+                x=[cx, cx + vel_scale * vx],
+                y=[cy, cy + vel_scale * vy],
+                mode="lines+markers",
+                line=dict(color=_GREEN, width=3),
+                marker=dict(symbol=["circle", "triangle-up"],
+                            size=[8, 12], color=_GREEN,
+                            angle=[0, np.degrees(np.arctan2(vy, vx)) - 90]),
+                name="velocity",
+            ),
+            go.Scatter(
+                x=[cx], y=[cy],
+                mode="markers",
+                marker=dict(color=_ACCENT, size=10, symbol="circle",
+                            line=dict(color=_FG, width=1)),
+                name="current estimate",
+                showlegend=False,
+            ),
+        ]
+
+    frames = [go.Frame(data=frame_traces(i), name=str(i)) for i in indices]
+    fig    = go.Figure(data=frame_traces(indices[0]), frames=frames)
+    fig.update_layout(
+        title=dict(text=title, font=dict(size=18, color=_FG)),
+        xaxis=dict(range=[xmin, xmax], **_YAXIS_BASE, title="x [m]"),
+        yaxis=dict(range=[ymin, ymax], scaleanchor="x", scaleratio=1,
+                   **_YAXIS_BASE, title="y [m]"),
+        updatemenus=[dict(
+            type="buttons",
+            showactive=False,
+            y=0.02, x=0.5, xanchor="center",
+            buttons=[
+                dict(label="▶  Play", method="animate",
+                     args=[None, dict(
+                         frame=dict(duration=frame_duration_ms, redraw=True),
+                         fromcurrent=True, transition=dict(duration=0))]),
+                dict(label="⏸  Pause", method="animate",
+                     args=[[None], dict(
+                         frame=dict(duration=0, redraw=False),
+                         mode="immediate")]),
+            ],
+        )],
+        sliders=[dict(
+            steps=[dict(method="animate",
+                        args=[[f.name], dict(mode="immediate",
+                                             frame=dict(duration=0, redraw=True),
+                                             transition=dict(duration=0))],
+                        label=str(i))
+                   for i, f in zip(indices, frames)],
+            transition=dict(duration=0),
+            x=0.05, y=0.0, len=0.9,
+            currentvalue=dict(prefix="step: ", font=dict(color=_FG)),
+            font=dict(color=_FG),
+            bgcolor=_GRID, bordercolor=_GRID,
+        )],
+        **_LAYOUT_BASE,
+    )
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# 8. EKF MC estimates — all trials overlaid with ground truth
+# ---------------------------------------------------------------------------
+
+def plot_mc_estimates(
+    traj:   RigidBodyTrajectory,
+    s_hist: np.ndarray,
+    title:  str = "EKF — MC Trial Estimates vs Ground Truth",
+    alpha:  float = 0.5,
+) -> go.Figure:
+    """
+    Overlay every MC trial's estimated (x, y) path with the ground-truth path.
+
+    Parameters
+    ----------
+    s_hist : (n_trials, nt, 5)  EKF state history [x, y, θ, vx, vy]
+    """
+    n = s_hist.shape[0]
+    gt_xs, gt_ys, _ = _extract_path(traj, trial=0)
+
+    fig = go.Figure()
+    for i in range(n):
+        colour = _MC_COLOURS[i % len(_MC_COLOURS)]
+        fig.add_trace(go.Scatter(
+            x=s_hist[i, :, 0], y=s_hist[i, :, 1],
+            mode="lines",
+            line=dict(color=colour, width=1.2),
+            opacity=alpha,
+            name=f"trial {i}",
+            showlegend=(n <= 12),
+        ))
+
+    fig.add_trace(go.Scatter(
+        x=gt_xs, y=gt_ys,
+        mode="lines",
+        line=dict(color=_ORANGE, width=3.0, dash="dash"),
+        name="ground truth",
+    ))
+
+    fig.update_layout(
+        title=dict(text=title, font=dict(size=18, color=_FG)),
+        xaxis=dict(title="x [m]", **_YAXIS_BASE),
+        yaxis=dict(title="y [m]", scaleanchor="x", scaleratio=1, **_YAXIS_BASE),
+        **_LAYOUT_BASE,
+    )
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# 9. EKF state time series — estimate vs ground truth vs measurements
+# ---------------------------------------------------------------------------
+
+def plot_ekf_states(
+    traj:   RigidBodyTrajectory,
+    s_hist: np.ndarray,
+    trial:  int = 0,
+    title:  str = "EKF — State Estimates vs Ground Truth & Measurements",
+) -> go.Figure:
+    """
+    Five stacked subplots (x, y, θ, vx, vy) comparing the KF estimate against
+    the ground truth and, where available, the raw noisy measurements.
+
+    Parameters
+    ----------
+    s_hist : (n_trials, nt, 5)  EKF state history [x, y, θ, vx, vy]
+    trial  : which MC trial to plot
+    """
+    times = traj.timestamps
+    nt    = traj.nt
+
+    est = s_hist[trial]                          # (nt, 5)
+
+    gt_x  = np.array([traj.poses[k].x[trial]     for k in range(nt)])
+    gt_y  = np.array([traj.poses[k].y[trial]     for k in range(nt)])
+    gt_th = np.array([traj.poses[k].theta[trial] for k in range(nt)])
+    gt_vx = traj.velocity_W[trial, :, 0]
+    gt_vy = traj.velocity_W[trial, :, 1]
+
+    meas_x  = traj.pos_meas_W[trial, :, 0]
+    meas_y  = traj.pos_meas_W[trial, :, 1]
+    meas_th = traj.heading_meas_W[trial, :]
+
+    panels = [
+        ("x [m]",     est[:, 0], gt_x,  meas_x),
+        ("y [m]",     est[:, 1], gt_y,  meas_y),
+        ("θ [rad]",   est[:, 2], gt_th, meas_th),
+        ("vx [m/s]",  est[:, 3], gt_vx, None),
+        ("vy [m/s]",  est[:, 4], gt_vy, None),
+    ]
+
+    fig = make_subplots(
+        rows=5, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.05,
+        subplot_titles=[p[0] for p in panels],
+    )
+
+    _ax_style = dict(gridcolor=_GRID, zerolinecolor=_GRID, color=_FG)
+
+    for row, (ylabel, est_vals, gt_vals, meas_vals) in enumerate(panels, start=1):
+        if meas_vals is not None:
+            fig.add_trace(go.Scatter(
+                x=times, y=meas_vals,
+                mode="lines",
+                line=dict(color=_WARM, width=0.8),
+                opacity=0.55,
+                name="measurement",
+                showlegend=(row == 1),
+                legendgroup="meas",
+            ), row=row, col=1)
+
+        fig.add_trace(go.Scatter(
+            x=times, y=gt_vals,
+            mode="lines",
+            line=dict(color=_ORANGE, width=2.0, dash="dash"),
+            name="ground truth",
+            showlegend=(row == 1),
+            legendgroup="gt",
+        ), row=row, col=1)
+
+        fig.add_trace(go.Scatter(
+            x=times, y=est_vals,
+            mode="lines",
+            line=dict(color=_ACCENT, width=2.0),
+            name="KF estimate",
+            showlegend=(row == 1),
+            legendgroup="est",
+        ), row=row, col=1)
+
+        fig.update_yaxes(title_text=ylabel, row=row, col=1, **_ax_style)
+        fig.update_xaxes(row=row, col=1, **_ax_style)
+
+    fig.update_xaxes(title_text="time [s]", row=5, col=1)
+
+    for ann in fig.layout.annotations:
+        ann.font.color = _FG
+        ann.font.size  = 12
+
+    fig.update_layout(
+        title=dict(text=title, font=dict(size=18, color=_FG)),
+        paper_bgcolor=_BG,
+        plot_bgcolor=_BG,
+        font=dict(color=_FG, family="monospace"),
+        legend=dict(bgcolor="#161b22", bordercolor=_GRID, borderwidth=1),
+        height=900,
+    )
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# 10. MC trial total MSE — trace(P) over time
+# ---------------------------------------------------------------------------
+
+def plot_mc_mse(
+    P_hist: np.ndarray,
+    traj:   RigidBodyTrajectory,
+    title:  str = "EKF — Total MSE (trace P) per MC Trial",
+    alpha:  float = 0.55,
+) -> go.Figure:
+    """
+    One line per MC trial showing how the total state uncertainty (trace of
+    the EKF covariance matrix) evolves over time.
+
+    Parameters
+    ----------
+    P_hist : (n_trials, nt, 5, 5)  EKF covariance history
+    """
+    n     = P_hist.shape[0]
+    times = traj.timestamps
+    # trace of P at each timestep: sum of diagonal elements
+    mse   = P_hist[:, :, np.arange(5), np.arange(5)].sum(axis=-1)  # (n, nt)
+
+    fig = go.Figure()
+    for i in range(n):
+        colour = _MC_COLOURS[i % len(_MC_COLOURS)]
+        fig.add_trace(go.Scatter(
+            x=times, y=mse[i],
+            mode="lines",
+            line=dict(color=colour, width=1.2),
+            opacity=alpha,
+            name=f"trial {i}",
+            showlegend=(n <= 12),
+        ))
+
+    fig.update_layout(
+        title=dict(text=title, font=dict(size=18, color=_FG)),
+        xaxis=dict(title="time [s]", **_YAXIS_BASE),
+        yaxis=dict(title="trace(P)", **_YAXIS_BASE),
+        **_LAYOUT_BASE,
     )
     return fig
