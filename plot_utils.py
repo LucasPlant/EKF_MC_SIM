@@ -857,18 +857,18 @@ def plot_ekf_states(
 
     gt_x  = np.array([traj.poses[k].x[trial]     for k in range(nt)])
     gt_y  = np.array([traj.poses[k].y[trial]     for k in range(nt)])
-    gt_th = np.array([traj.poses[k].theta[trial] for k in range(nt)])
+    gt_th = np.unwrap(np.array([traj.poses[k].theta[trial] for k in range(nt)]))
     gt_vx = traj.velocity_W[trial, :, 0]
     gt_vy = traj.velocity_W[trial, :, 1]
 
     meas_x  = traj.pos_meas_W[trial, :, 0]
     meas_y  = traj.pos_meas_W[trial, :, 1]
-    meas_th = traj.heading_meas_W[trial, :]
+    meas_th = np.unwrap(traj.heading_meas_W[trial, :])
 
     panels = [
-        ("x [m]",     est[:, 0], gt_x,  meas_x),
-        ("y [m]",     est[:, 1], gt_y,  meas_y),
-        ("θ [rad]",   est[:, 2], gt_th, meas_th),
+        ("x [m]",     est[:, 0],              gt_x,  meas_x),
+        ("y [m]",     est[:, 1],              gt_y,  meas_y),
+        ("θ [rad]",   np.unwrap(est[:, 2]),   gt_th, meas_th),
         ("vx [m/s]",  est[:, 3], gt_vx, None),
         ("vy [m/s]",  est[:, 4], gt_vy, None),
     ]
@@ -970,7 +970,7 @@ def plot_mc_mse(
     fig.update_layout(
         title=dict(text=title, font=dict(size=18, color=_FG)),
         xaxis=dict(title="time [s]", **_YAXIS_BASE),
-        yaxis=dict(title="trace(P)", **_YAXIS_BASE),
+        yaxis=dict(title="trace(P)", type="log", **_YAXIS_BASE),
         **_LAYOUT_BASE,
     )
     return fig
