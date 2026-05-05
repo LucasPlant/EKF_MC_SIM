@@ -27,7 +27,6 @@ from sim import (
 from plot_utils import (
     plot_trajectory,
     animate_trajectory,
-    plot_mc_paths,
     plot_imu_measurements,
     plot_trajectory_with_bounds,
 )
@@ -170,9 +169,6 @@ def run_demo(name: str, cfg: dict, save_html: bool) -> None:
         ("Animation",
              animate_trajectory(traj, trial=0, step=4, axis_scale=0.4,
                                 title=f"{label} — Animation", frame_duration_ms=30)),
-        (f"Monte Carlo Paths ({N_TRIALS} trials)",
-             plot_mc_paths(traj,
-                           title=f"{label} — Monte Carlo Paths ({N_TRIALS} trials)")),
         ("IMU Measurements",
              plot_imu_measurements(traj,
                                    title=f"{label} — IMU Measurements")),

@@ -635,9 +635,10 @@ class RandomWalk(RigidBodySim):
         self._rng       = np.random.default_rng(self.noise_cfg.seed)
 
     def force_world_W(self, t: float, state: np.ndarray) -> np.ndarray:
-        """Stochastic force applied directly in the world frame."""
-        f = self._rng.normal(0.0, self.force_std, size=(self.n, 2))
-        return f * self.mass[:, None]
+        """Single shared random force broadcast to all trials."""
+        f = self._rng.normal(0.0, self.force_std, size=(1, 2))
+        return np.broadcast_to(f * self.mass[0], (self.n, 2)).copy()
 
     def torque(self, t: float, state: np.ndarray) -> np.ndarray:
-        return self._rng.normal(0.0, self.torque_std, size=self.n) * self.inertia
+        tau = self._rng.normal(0.0, self.torque_std) * self.inertia[0]
+        return np.full(self.n, tau)
