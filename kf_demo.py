@@ -78,12 +78,13 @@ T_SPAN   = (0.0, 15.0)
 MASS     = 1.0
 INERTIA  = 0.5
 
-NOISE_CFG = NoiseConfig(
-    imu_cov     = np.diag([0.10**2, 0.10**2, 0.05**2]),
-    pos_cov     = np.diag([0.20**2, 0.20**2]),
-    heading_var = 0.10**2,
-    seed        = 7,
+NOISE_CFG  = NoiseConfig(
+    imu_cov     = np.diag([0.2**2, 0.2**2, 0.1**2]),
+    pos_cov     = np.diag([0.4**2, 0.4**2]),
+    heading_var = 0.5**2,   # ~5.7° std dev for pseudo-GPS heading
+    # seed        = 42,
 )
+
 
 SIGMA0_INIT  = 5.0      # [m/s] initial velocity std dev
 

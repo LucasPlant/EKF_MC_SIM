@@ -46,9 +46,9 @@ MASS       = 1.0       # [kg]
 INERTIA    = 0.5       # [kg·m²]
 
 NOISE_CFG  = NoiseConfig(
-    imu_cov     = np.diag([0.1**2, 0.1**2, 0.05**2]),
-    pos_cov     = np.diag([0.2**2, 0.2**2]),
-    heading_var = 0.1**2,   # ~5.7° std dev for pseudo-GPS heading
+    imu_cov     = np.diag([0.2**2, 0.2**2, 0.1**2]),
+    pos_cov     = np.diag([0.4**2, 0.4**2]),
+    heading_var = 0.5**2,   # ~5.7° std dev for pseudo-GPS heading
     seed        = 42,
 )
 
