@@ -939,38 +939,80 @@ def plot_ekf_states(
 def plot_mc_mse(
     P_hist: np.ndarray,
     traj:   RigidBodyTrajectory,
-    title:  str = "EKF — Total MSE (trace P) per MC Trial",
-    alpha:  float = 0.55,
+    s_hist: np.ndarray,
+    title:  str = "EKF — Uncertainty & Position Error over Time",
+    alpha:  float = 0.35,
 ) -> go.Figure:
     """
-    One line per MC trial showing how the total state uncertainty (trace of
-    the EKF covariance matrix) evolves over time.
+    Three overlaid series on a log-scale axis:
+      - trace(P) per trial                        (dashed, faint)
+      - total squared error per trial vs GT       (solid, faint, same units)
+      - MC variance of squared error across trials (bold white)
 
     Parameters
     ----------
-    P_hist : (n_trials, nt, 5, 5)  EKF covariance history
+    P_hist : (n, nt, 5, 5)  EKF covariance history
+    s_hist : (n, nt, 5)     EKF state history  [x, y, theta, vx, vy]
     """
-    n     = P_hist.shape[0]
+    n, nt = P_hist.shape[:2]
     times = traj.timestamps
-    # trace of P at each timestep: sum of diagonal elements
-    mse   = P_hist[:, :, np.arange(5), np.arange(5)].sum(axis=-1)  # (n, nt)
+
+    trace_P = P_hist[:, :, np.arange(5), np.arange(5)].sum(axis=-1)  # (n, nt)
+
+    # ground truth for all 5 EKF states
+    gt_x     = np.stack([traj.poses[k].x         for k in range(nt)], axis=1)  # (n, nt)
+    gt_y     = np.stack([traj.poses[k].y         for k in range(nt)], axis=1)
+    gt_theta = np.stack([traj.poses[k].theta     for k in range(nt)], axis=1)
+    gt_vx    = traj.velocity_W[:, :, 0]                                         # (n, nt)
+    gt_vy    = traj.velocity_W[:, :, 1]
+
+    sq_err = (
+        (s_hist[:, :, 0] - gt_x)     ** 2
+      + (s_hist[:, :, 1] - gt_y)     ** 2
+      + (s_hist[:, :, 2] - gt_theta) ** 2
+      + (s_hist[:, :, 3] - gt_vx)    ** 2
+      + (s_hist[:, :, 4] - gt_vy)    ** 2
+    )  # (n, nt)
+
+    mc_var = sq_err.var(axis=0)  # (nt,)
 
     fig = go.Figure()
+
     for i in range(n):
         colour = _MC_COLOURS[i % len(_MC_COLOURS)]
         fig.add_trace(go.Scatter(
-            x=times, y=mse[i],
+            x=times, y=trace_P[i],
             mode="lines",
-            line=dict(color=colour, width=1.2),
+            line=dict(color=colour, width=1, dash="dash"),
             opacity=alpha,
-            name=f"trial {i}",
-            showlegend=(n <= 12),
+            legendgroup="traceP",
+            name="trace(P)" if i == 0 else f"trace(P) {i}",
+            showlegend=(i == 0),
         ))
+
+    for i in range(n):
+        colour = _MC_COLOURS[i % len(_MC_COLOURS)]
+        fig.add_trace(go.Scatter(
+            x=times, y=sq_err[i],
+            mode="lines",
+            line=dict(color=colour, width=1),
+            opacity=alpha,
+            legendgroup="sqerr",
+            name="total sq. error" if i == 0 else f"sq. error {i}",
+            showlegend=(i == 0),
+        ))
+
+    fig.add_trace(go.Scatter(
+        x=times, y=mc_var,
+        mode="lines",
+        line=dict(color="#ffffff", width=2.5),
+        name="MC var(sq. error)",
+    ))
 
     fig.update_layout(
         title=dict(text=title, font=dict(size=18, color=_FG)),
         xaxis=dict(title="time [s]", **_YAXIS_BASE),
-        yaxis=dict(title="trace(P)", type="log", **_YAXIS_BASE),
+        yaxis=dict(title="value (log scale)", type="log", **_YAXIS_BASE),
         **_LAYOUT_BASE,
     )
     return fig

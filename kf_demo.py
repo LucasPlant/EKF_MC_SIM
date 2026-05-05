@@ -37,7 +37,6 @@ from sim import (
 from plot_utils import (
     plot_trajectory,
     animate_trajectory,
-    plot_mc_paths,
     plot_imu_measurements,
     plot_trajectory_with_bounds,
     animate_estimate,
@@ -72,9 +71,9 @@ def build_ekf_inputs(traj: RigidBodyTrajectory) -> tuple[np.ndarray, np.ndarray]
 # Demo registry
 # ---------------------------------------------------------------------------
 
-N_TRIALS = 25
+N_TRIALS = 100
 DT       = 0.02
-T_SPAN   = (0.0, 15.0)
+T_SPAN   = (0.0, 20.0)
 MASS     = 1.0
 INERTIA  = 0.5
 
@@ -115,7 +114,7 @@ DEMOS: dict[str, dict] = {
     "random_walk": dict(
         label   = "Random Walk",
         sim_cls = RandomWalk,
-        sim_kw  = dict(force_std=2.0, torque_std=1.5),
+        sim_kw  = dict(force_std=1.5, torque_std=1.0),
         init    = _initial_state(x0=0.0, y0=0.0, theta0=0.0, vx0=0.0, vy0=0.0),
     ),
 }
@@ -202,9 +201,6 @@ def run_demo(name: str, cfg: dict, save_html: bool) -> None:
             animate_trajectory(traj, trial=0, step=4, axis_scale=0.4,
                                title=f"{label} — Animation",
                                frame_duration_ms=30)),
-        (f"Monte Carlo Paths ({N_TRIALS} trials)",
-            plot_mc_paths(traj,
-                          title=f"{label} — Monte Carlo Paths ({N_TRIALS} trials)")),
         ("IMU Measurements",
             plot_imu_measurements(traj,
                                   title=f"{label} — IMU Measurements")),
@@ -221,9 +217,9 @@ def run_demo(name: str, cfg: dict, save_html: bool) -> None:
         (f"EKF — All MC Trial Estimates ({N_TRIALS} trials)",
             plot_mc_estimates(traj, s_hist,
                               title=f"{label} — EKF Estimates vs Ground Truth")),
-        (f"EKF — Total MSE per MC Trial ({N_TRIALS} trials)",
-            plot_mc_mse(P_hist, traj,
-                        title=f"{label} — Total MSE (trace P) per Trial")),
+        (f"EKF — Uncertainty & Error ({N_TRIALS} trials)",
+            plot_mc_mse(P_hist, traj, s_hist,
+                        title=f"{label} — Uncertainty & Position Error")),
     ]
 
     page = _build_page(label, sections)
