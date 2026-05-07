@@ -120,7 +120,7 @@ class EKF:
         return F
 
     # ------------------------------------------------------------------
-    # Predict — writes s_hat, P  (the prior for the next update)
+    # Predict: writes s_hat, P  (the prior for the next update)
     # ------------------------------------------------------------------
 
     def _propagate(self, u: np.ndarray) -> None:
@@ -140,7 +140,7 @@ class EKF:
         )
         self.s_hat[:, 2] = _wrap(self.s_hat[:, 2])
 
-        # P⁻ = F P F^T + B Σ_imu B^T
+        # P- = F P F^T + B Σ_imu B^T
         FP    = np.einsum("nij,njk->nik", F, self.P)          # F P
         FPFt  = np.einsum("nij,nkj->nik", FP, F)              # F P F^T
         BSig  = np.einsum("nij,jk->nik", B, self.Sigma_imu)   # B Σ_imu
@@ -159,28 +159,28 @@ class EKF:
         """
         H, R = self.H, self.R
 
-        # ν = z - H s⁻  (innovation, heading wrapped)
-        nu = z - np.einsum("ij,nj->ni", H, self.s_hat)   # H s⁻
+        # ν = z - H s-  (innovation, heading wrapped)
+        nu = z - np.einsum("ij,nj->ni", H, self.s_hat)   # H s-
         nu[:, 2] = _wrap(nu[:, 2])
 
-        # S = H P⁻ H^T + R  (innovation covariance)
-        HP = np.einsum("ij,njk->nik", H, self.P)          # H P⁻
-        S  = np.einsum("nij,kj->nik", HP, H) + R          # H P⁻ H^T + R   (n, 3, 3)
+        # S = H P- H^T + R  (innovation covariance)
+        HP = np.einsum("ij,njk->nik", H, self.P)          # H P-
+        S  = np.einsum("nij,kj->nik", HP, H) + R          # H P- H^T + R   (n, 3, 3)
 
-        # K = P⁻ H^T S^{-1}, via batched solve:
-        #   S K^T = H P⁻  →  K = solve(S, H P⁻)^T
+        # K = P- H^T S^-1, via batched solve:
+        #   S K^T = H P-  K = solve(S, H P-)^T
         K = np.linalg.solve(S, HP).transpose(0, 2, 1)     # (n, 5, 3)
 
-        # s = s⁻ + K ν
+        # s = s- + K ν
         self.s_hat = self.s_hat + np.einsum("nij,nj->ni", K, nu)   # K ν
         self.s_hat[:, 2] = _wrap(self.s_hat[:, 2])
 
-        # Joseph form: P = (I - KH) P⁻ (I - KH)^T + K R K^T
+        # joseph form: P = (I - KH) P- (I - KH)^T + K R K^T
         I    = np.eye(5)
         KH   = np.einsum("nij,jk->nik", K, H)             # K H
         IKH  = I - KH                                       # I - K H
-        P1   = np.einsum("nij,njk->nik", IKH, self.P)     # (I-KH) P⁻
-        P1   = np.einsum("nij,nkj->nik", P1, IKH)         # (I-KH) P⁻ (I-KH)^T
+        P1   = np.einsum("nij,njk->nik", IKH, self.P)     # (I-KH) P-
+        P1   = np.einsum("nij,nkj->nik", P1, IKH)         # (I-KH) P- (I-KH)^T
         KR   = np.einsum("nij,jk->nik", K, R)             # K R
         KRKt = np.einsum("nij,nkj->nik", KR, K)           # K R K^T
         self.P = P1 + KRKt
@@ -195,7 +195,7 @@ class EKF:
         u_seq: np.ndarray,    # (n, nt, 3)
     ) -> tuple[np.ndarray, np.ndarray]:
         """
-        Run propagate→update for nt steps across all n trials.
+        Run propagate and update for nt steps across all n trials.
 
         The first measurement is consumed by the constructor, so step k = 0
         of the loop performs only an update (no propagation yet) using z_seq[:, 0]
